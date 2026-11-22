@@ -2,12 +2,12 @@ import re
 import requests
 from playwright.sync_api import sync_playwright
 
-# 1. REPLACE WITH YOUR REAL M3U LINKS (or leave empty [] to test freeiptv alone)
+# 1. YOUR OTHER STATIC M3U LINKS
 OTHER_M3U_URLS = [
     # "http://your-other-server:8080/get.php?username=USER&password=PASS&type=m3u_plus&output=ts",
 ]
 
-# 2. YOUR ~50 FAVORITE CHANNELS (Partial or exact names, case-insensitive)
+# 2. YOUR ~50 FAVORITE CHANNELS
 WANTED_CHANNELS = [
     "Star Plus",
     "Sony TV",
@@ -25,27 +25,30 @@ XTREAM_HOST = "http://freeiptv.ottc.xyz:80"
 
 def get_freeiptv_m3u():
     with sync_playwright() as p:
-        # Use standard browser flags so the site's JS countdown timer runs normally
+        # Launching with headless=False inside xvfb prevents JS timer throttling
         browser = p.chromium.launch(
-            headless=True,
+            headless=False,
             args=["--disable-blink-features=AutomationControlled"]
         )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         )
         page = context.new_page()
-        page.goto(TRIAL_SITE_URL, wait_until="load", timeout=30000)
-
-        # Wait 10 seconds for the 5-second JS timer to finish unlocking #create-btn
-        page.wait_for_timeout(10000)
+        page.goto(TRIAL_SITE_URL, wait_until="networkidle", timeout=30000)
 
         btn = page.locator("#create-btn")
         if btn.count() > 0:
-            # If the timer didn't unlock it automatically, force-enable it and click
-            if btn.is_disabled():
-                page.evaluate("document.getElementById('create-btn').removeAttribute('disabled')")
-            btn.click()
-            page.wait_for_timeout(6000)
+            try:
+                # Wait up to 15s for the site's own script to naturally enable the button
+                page.wait_for_selector("#create-btn:not([disabled])", timeout=15000)
+                btn.click()
+                page.wait_for_load_state("networkidle", timeout=15000)
+                page.wait_for_timeout(3000)
+            except Exception as wait_err:
+                # If it still didn't unlock naturally, dump the form HTML so we can see why
+                form_html = page.evaluate("document.body.innerHTML")
+                browser.close()
+                raise Exception(f"Button stayed locked ({wait_err}). Body HTML:\n{form_html[:1500]}")
 
         page_text = page.inner_text("body")
         page_html = page.content()
@@ -65,7 +68,7 @@ def get_freeiptv_m3u():
             user, pwd = user_match.group(1), pass_match.group(1)
             return f"{XTREAM_HOST}/get.php?username={user}&password={pwd}&type=m3u_plus&output=ts"
 
-        raise Exception(f"Could not extract credentials. Page snippet:\n{page_text[:400]}")
+        raise Exception(f"Clicked button, but no credentials appeared. URL: {page.url}\nSnippet:\n{page_text[:400]}")
 
 
 def build_filtered_playlist():
