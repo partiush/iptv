@@ -21,7 +21,7 @@ jobs:
           pip install requests playwright
           playwright install chromium
       - name: Run playlist updater
-        run: python update.py
+        run: xvfb-run --auto-servernum python update.py
       - name: Save updated playlist
         run: |
           git config user.name "IPTV Bot"
