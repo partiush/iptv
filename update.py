@@ -2,10 +2,9 @@ import re
 import requests
 from playwright.sync_api import sync_playwright
 
-# 1. YOUR OTHER STATIC M3U LINKS
+# 1. REPLACE WITH YOUR REAL M3U LINKS (or leave empty [] to test freeiptv alone)
 OTHER_M3U_URLS = [
-    "https://example.com/playlist2.m3u",
-    "https://example.com/playlist3.m3u",
+    # "http://your-other-server:8080/get.php?username=USER&password=PASS&type=m3u_plus&output=ts",
 ]
 
 # 2. YOUR ~50 FAVORITE CHANNELS (Partial or exact names, case-insensitive)
@@ -18,7 +17,6 @@ WANTED_CHANNELS = [
     "Aaj Tak",
     "NDTV India",
     "PTC Punjabi",
-    # Add the rest of your ~50 channel names here
 ]
 
 TRIAL_SITE_URL = "https://freeiptv2023-d.ottc.xyz"
@@ -27,23 +25,28 @@ XTREAM_HOST = "http://freeiptv.ottc.xyz:80"
 
 def get_freeiptv_m3u():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Use standard browser flags so the site's JS countdown timer runs normally
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"]
+        )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         )
         page = context.new_page()
-        page.goto(TRIAL_SITE_URL, wait_until="domcontentloaded", timeout=30000)
+        page.goto(TRIAL_SITE_URL, wait_until="load", timeout=30000)
 
-        # Wait 8 seconds to clear the 5-second unlock countdown
-        page.wait_for_timeout(8000)
+        # Wait 10 seconds for the 5-second JS timer to finish unlocking #create-btn
+        page.wait_for_timeout(10000)
 
-        # Click "Create free IPTV account !" if present (matches button, link, or div)
-        create_btn = page.get_by_text("Create free IPTV account", exact=False)
-        if create_btn.count() > 0:
-            create_btn.first.click()
-            page.wait_for_timeout(5000)
+        btn = page.locator("#create-btn")
+        if btn.count() > 0:
+            # If the timer didn't unlock it automatically, force-enable it and click
+            if btn.is_disabled():
+                page.evaluate("document.getElementById('create-btn').removeAttribute('disabled')")
+            btn.click()
+            page.wait_for_timeout(6000)
 
-        # Grab both visible text and raw HTML so truncated visual text won't break extraction
         page_text = page.inner_text("body")
         page_html = page.content()
         browser.close()
